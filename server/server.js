@@ -1,24 +1,41 @@
-const express = require("express");
+const express = require('express');
+const http = require('http');
+const socketIO = require('socket.io');
+const path = require('path');
+
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
+const server = http.createServer(app);
+const io = socketIO(server);
 
-app.use(express.static("public"));
+// Serve static files from public folder
+app.use(express.static(path.join(__dirname, '../public')));
 
-io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
+io.on('connection', socket => {
+    console.log('New user connected: ' + socket.id);
 
-    socket.emit("yourId", socket.id);
-
-    socket.on("offer", ({ to, offer }) => {
-        io.to(to).emit("receiveOffer", { from: socket.id, offer });
+    socket.on('call-user', data => {
+        io.to(data.to).emit('call-made', {
+            offer: data.offer,
+            socket: socket.id
+        });
     });
 
-    socket.on("answer", ({ to, answer }) => {
-        io.to(to).emit("receiveAnswer", { from: socket.id, answer });
+    socket.on('make-answer', data => {
+        io.to(data.to).emit('answer-made', {
+            answer: data.answer,
+            socket: socket.id
+        });
+    });
+
+    socket.on('ice-candidate', data => {
+        io.to(data.to).emit('ice-candidate', {
+            candidate: data.candidate,
+            socket: socket.id
+        });
     });
 });
 
-http.listen(3000, () => {
-    console.log("Server running on http://localhost:3000");
+const PORT = 3000;
+server.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
 });

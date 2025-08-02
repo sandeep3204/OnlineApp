@@ -1,75 +1,175 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
-    <title>Couple Video Calling App</title>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Couple Video Calling App with Screen Share</title>
     <style>
+      body {
+        font-family: Arial, sans-serif;
+        text-align: center;
+        background: #f0f4f8;
+        padding: 20px;
+      }
       video {
         width: 45%;
-        border: 2px solid #ccc;
         margin: 10px;
+        border: 2px solid #555;
+        border-radius: 10px;
+        background-color: #000;
+      }
+      #controls {
+        margin-top: 15px;
+      }
+      button,
+      input {
+        margin: 5px;
+        padding: 10px 16px;
+        font-size: 16px;
+        border-radius: 6px;
+        border: none;
+        outline: none;
+        cursor: pointer;
+        transition: background 0.3s, transform 0.2s;
+      }
+      button {
+        background-color: #007bff;
+        color: white;
+      }
+      button:hover {
+        background-color: #0056b3;
+        transform: scale(1.05);
+      }
+      button:active {
+        transform: scale(0.95);
+      }
+      input {
+        border: 1px solid #ccc;
+        width: 200px;
+      }
+      input:focus {
+        border-color: #007bff;
+        box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+      }
+      #yourId {
+        font-weight: bold;
+        color: green;
       }
     </style>
   </head>
   <body>
-    <h2>Couple Video Calling</h2>
-
-    <video id="localVideo" autoplay playsinline muted></video>
+    <h2>Couple Video Calling App with Screen Sharing</h2>
+    <video id="localVideo" autoplay muted playsinline></video>
     <video id="remoteVideo" autoplay playsinline></video>
 
-    <br />
-    <input type="text" id="remoteIdInput" placeholder="Enter Remote ID" />
-    <button onclick="callUser()">Call</button>
+    <div id="controls">
+      <p>Your ID: <span id="yourId"></span></p>
+      <input type="text" id="remoteId" placeholder="Enter remote ID" />
+      <br />
+      <button onclick="startCall()">Start Call</button>
+      <button onclick="toggleCamera()">Toggle Camera</button>
+      <button onclick="toggleMic()">Toggle Mic</button>
+      <button onclick="shareScreen()">Share Screen</button>
+      <button onclick="toggleFullscreen()">Full Screen</button>
+    </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
+    <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
     <script>
-      const socket = io();
-
+      const socket = io("http://localhost:3000");
       const localVideo = document.getElementById("localVideo");
       const remoteVideo = document.getElementById("remoteVideo");
-      const remoteIdInput = document.getElementById("remoteIdInput");
+      const remoteIdInput = document.getElementById("remoteId");
+      const yourIdSpan = document.getElementById("yourId");
 
       let localStream;
-      let remoteId = "";
-      let socketId = "";
+      let peer;
+      let isMicOn = true;
+      let isCamOn = true;
 
-      const peer = new RTCPeerConnection({
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      async function getMedia() {
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+          localVideo.srcObject = localStream;
+        } catch (err) {
+          console.error("Failed to get media:", err);
+        }
+      }
+
+      getMedia();
+
+      socket.on("connect", () => {
+        yourIdSpan.textContent = socket.id;
       });
 
-      navigator.mediaDevices
-        .getUserMedia({ video: true, audio: true })
-        .then((stream) => {
-          localStream = stream;
-          localVideo.srcObject = stream;
-          stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+      socket.on("signal", ({ from, data }) => {
+        if (!peer) createPeer(false);
+        peer.signal(data);
+      });
+
+      function createPeer(initiator) {
+        peer = new SimplePeer({
+          initiator,
+          trickle: false,
+          stream: localStream,
         });
 
-      peer.ontrack = (event) => {
-        remoteVideo.srcObject = event.streams[0];
-      };
+        peer.on("signal", (data) => {
+          const remoteId = remoteIdInput.value;
+          socket.emit("signal", { to: remoteId, from: socket.id, data });
+        });
 
-      socket.on("yourId", (id) => {
-        socketId = id;
-        console.log("My ID:", id);
-      });
+        peer.on("stream", (stream) => {
+          remoteVideo.srcObject = stream;
+        });
+      }
 
-      socket.on("receiveOffer", async ({ from, offer }) => {
-        remoteId = from;
-        await peer.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        socket.emit("answer", { to: remoteId, answer });
-      });
+      function startCall() {
+        createPeer(true);
+      }
 
-      socket.on("receiveAnswer", async ({ from, answer }) => {
-        await peer.setRemoteDescription(new RTCSessionDescription(answer));
-      });
+      function toggleCamera() {
+        isCamOn = !isCamOn;
+        localStream.getVideoTracks()[0].enabled = isCamOn;
+      }
 
-      async function callUser() {
-        remoteId = remoteIdInput.value;
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
-        socket.emit("offer", { to: remoteId, offer });
+      function toggleMic() {
+        isMicOn = !isMicOn;
+        localStream.getAudioTracks()[0].enabled = isMicOn;
+      }
+
+      async function shareScreen() {
+        try {
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+          });
+          const screenTrack = screenStream.getVideoTracks()[0];
+
+          const sender = peer.streams[0].getVideoTracks()[0];
+          const videoSender = peer._pc
+            .getSenders()
+            .find((s) => s.track.kind === "video");
+          if (videoSender) videoSender.replaceTrack(screenTrack);
+
+          screenTrack.onended = () => {
+            videoSender.replaceTrack(localStream.getVideoTracks()[0]);
+          };
+
+          localVideo.srcObject = screenStream;
+        } catch (err) {
+          console.error("Failed to share screen:", err);
+        }
+      }
+
+      function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen();
+        } else {
+          document.exitFullscreen();
+        }
       }
     </script>
   </body>
