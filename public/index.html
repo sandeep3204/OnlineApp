@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Couple Video Calling App</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+      video {
+        width: 45%;
+        border: 2px solid #ccc;
+        margin: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Couple Video Calling</h2>
+
+    <video id="localVideo" autoplay playsinline muted></video>
+    <video id="remoteVideo" autoplay playsinline></video>
+
+    <br />
+    <input type="text" id="remoteIdInput" placeholder="Enter Remote ID" />
+    <button onclick="callUser()">Call</button>
+
+    <script>
+      const socket = io();
+
+      const localVideo = document.getElementById("localVideo");
+      const remoteVideo = document.getElementById("remoteVideo");
+      const remoteIdInput = document.getElementById("remoteIdInput");
+
+      let localStream;
+      let remoteId = "";
+      let socketId = "";
+
+      const peer = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          localStream = stream;
+          localVideo.srcObject = stream;
+          stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+        });
+
+      peer.ontrack = (event) => {
+        remoteVideo.srcObject = event.streams[0];
+      };
+
+      socket.on("yourId", (id) => {
+        socketId = id;
+        console.log("My ID:", id);
+      });
+
+      socket.on("receiveOffer", async ({ from, offer }) => {
+        remoteId = from;
+        await peer.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit("answer", { to: remoteId, answer });
+      });
+
+      socket.on("receiveAnswer", async ({ from, answer }) => {
+        await peer.setRemoteDescription(new RTCSessionDescription(answer));
+      });
+
+      async function callUser() {
+        remoteId = remoteIdInput.value;
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        socket.emit("offer", { to: remoteId, offer });
+      }
+    </script>
+  </body>
+</html>
